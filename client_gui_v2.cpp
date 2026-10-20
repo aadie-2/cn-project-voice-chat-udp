@@ -15,7 +15,6 @@
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "winmm.lib")
 
-// --- Packet Header Structure (8 Bytes) ---
 #pragma pack(push, 1)
 struct PacketHeader {
     uint16_t clientID;
@@ -24,14 +23,12 @@ struct PacketHeader {
 };
 #pragma pack(pop)
 
-// --- Audio Constants ---
 const int SAMPLE_RATE = 16000;
 const int BITS_PER_SAMPLE = 16;
 const int CHANNELS = 1;
 const int FRAME_DURATION_MS = 20;
-const int AUDIO_BUFFER_SIZE = (SAMPLE_RATE * CHANNELS * (BITS_PER_SAMPLE / 8) * FRAME_DURATION_MS) / 1000; // 640 bytes
+const int AUDIO_BUFFER_SIZE = (SAMPLE_RATE * CHANNELS * (BITS_PER_SAMPLE / 8) * FRAME_DURATION_MS) / 1000; 
 
-// --- Control IDs ---
 #define IDC_EDIT_CLIENT_ID   101
 #define IDC_EDIT_ROOM_ID     102
 #define IDC_EDIT_SERVER_IP   103
@@ -43,7 +40,6 @@ const int AUDIO_BUFFER_SIZE = (SAMPLE_RATE * CHANNELS * (BITS_PER_SAMPLE / 8) * 
 #define IDC_STATUS_LABEL     109
 #define IDC_STATS_LABEL      110
 
-// --- Engine & UI Globals ---
 HWAVEOUT hWaveOut = NULL;
 HWAVEIN hWaveIn = NULL;
 SOCKET clientSocket = INVALID_SOCKET;
@@ -53,7 +49,7 @@ std::atomic<bool> isConnected(false);
 std::atomic<bool> isTransmitting(false);
 std::atomic<uint32_t> packetsSent(0);
 std::atomic<uint32_t> packetsRecv(0);
-std::atomic<int> audioVolumeLevel(0); // 0 to 100% for VU Meter
+std::atomic<int> audioVolumeLevel(0); 
 
 uint16_t g_clientID = 101;
 uint16_t g_roomID = 1;
@@ -66,7 +62,6 @@ HWND hComboMic, hComboSpeaker;
 
 HBRUSH hBgBrush, hPanelBrush, hGreenBrush, hDarkGreenBrush;
 
-// --- Calculate RMS Audio Volume for VU Meter ---
 int calculateAudioRMS(const char* pcmData, int size) {
     const int16_t* samples = reinterpret_cast<const int16_t*>(pcmData);
     int count = size / 2;
@@ -75,11 +70,10 @@ int calculateAudioRMS(const char* pcmData, int size) {
         sum += samples[i] * samples[i];
     }
     double rms = std::sqrt(sum / count);
-    int level = static_cast<int>((rms / 32768.0) * 100.0 * 3.0); // Boost scale
+    int level = static_cast<int>((rms / 32768.0) * 100.0 * 3.0); 
     return (level > 100) ? 100 : level;
 }
 
-// --- Initialize Speaker ---
 bool initSpeaker(UINT deviceID) {
     WAVEFORMATEX wfx{};
     wfx.wFormatTag = WAVE_FORMAT_PCM;
@@ -92,7 +86,6 @@ bool initSpeaker(UINT deviceID) {
     return (waveOutOpen(&hWaveOut, deviceID, &wfx, 0, 0, CALLBACK_NULL) == MMSYSERR_NOERROR);
 }
 
-// --- Initialize Microphone ---
 bool initMicrophone(UINT deviceID) {
     WAVEFORMATEX wfx{};
     wfx.wFormatTag = WAVE_FORMAT_PCM;
@@ -105,7 +98,6 @@ bool initMicrophone(UINT deviceID) {
     return (waveInOpen(&hWaveIn, deviceID, &wfx, 0, 0, CALLBACK_NULL) == MMSYSERR_NOERROR);
 }
 
-// --- Play Audio Chunk ---
 void playAudioChunk(char* pcmData, int dataSize) {
     if (!hWaveOut) return;
     WAVEHDR waveHeader{};
@@ -121,7 +113,6 @@ void playAudioChunk(char* pcmData, int dataSize) {
     waveOutUnprepareHeader(hWaveOut, &waveHeader, sizeof(WAVEHDR));
 }
 
-// --- Receiver Thread Loop ---
 void receiveLoop() {
     std::vector<char> buffer(sizeof(PacketHeader) + AUDIO_BUFFER_SIZE);
     sockaddr_in fromAddr;
@@ -137,7 +128,6 @@ void receiveLoop() {
             char* audioPayload = buffer.data() + sizeof(PacketHeader);
             int payloadSize = bytesRecv - sizeof(PacketHeader);
 
-            // Update VU Meter from incoming voice
             audioVolumeLevel = calculateAudioRMS(audioPayload, payloadSize);
 
             playAudioChunk(audioPayload, payloadSize);
@@ -145,7 +135,6 @@ void receiveLoop() {
     }
 }
 
-// --- Enumerate Devices into Combos ---
 void populateAudioDevices() {
     SendMessageA(hComboMic, CB_ADDSTRING, 0, (LPARAM)"0: Default Microphone (WAVE_MAPPER)");
     UINT numMics = waveInGetNumDevs();
@@ -170,7 +159,6 @@ void populateAudioDevices() {
     SendMessageA(hComboSpeaker, CB_SETCURSEL, 0, 0);
 }
 
-// --- Transmit Voice Frame ---
 void transmitAudioFrame() {
     if (!isConnected || !hWaveIn) return;
 
@@ -192,10 +180,8 @@ void transmitAudioFrame() {
     waveInStop(hWaveIn);
     waveInUnprepareHeader(hWaveIn, &micHeader, sizeof(WAVEHDR));
 
-    // Calculate volume level for local VU meter
     audioVolumeLevel = calculateAudioRMS(micAudioBuffer.data(), AUDIO_BUFFER_SIZE);
 
-    // Assemble UDP datagram with header
     PacketHeader header = { g_clientID, g_seqNum++, g_roomID };
     std::memcpy(packetBuffer.data(), &header, sizeof(PacketHeader));
     std::memcpy(packetBuffer.data() + sizeof(PacketHeader), micAudioBuffer.data(), AUDIO_BUFFER_SIZE);
@@ -206,16 +192,14 @@ void transmitAudioFrame() {
     packetsSent++;
 }
 
-// --- Window Procedure (Custom Dark Theme Painting) ---
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_CREATE: {
-        hBgBrush = CreateSolidBrush(RGB(30, 30, 46));       // Dark slate background
-        hPanelBrush = CreateSolidBrush(RGB(45, 45, 68));    // Panel grey
-        hGreenBrush = CreateSolidBrush(RGB(80, 250, 123));   // Bright neon green (VU)
+        hBgBrush = CreateSolidBrush(RGB(30, 30, 46));       
+        hPanelBrush = CreateSolidBrush(RGB(45, 45, 68));    
+        hGreenBrush = CreateSolidBrush(RGB(80, 250, 123));   
         hDarkGreenBrush = CreateSolidBrush(RGB(40, 100, 60));
 
-        // Create UI Input Elements
         CreateWindowA("STATIC", "Client ID:", WS_VISIBLE | WS_CHILD, 20, 20, 80, 20, hwnd, NULL, NULL, NULL);
         hEditClientID = CreateWindowA("EDIT", "101", WS_VISIBLE | WS_CHILD | WS_BORDER | ES_NUMBER, 100, 18, 70, 22, hwnd, (HMENU)IDC_EDIT_CLIENT_ID, NULL, NULL);
 
@@ -243,15 +227,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         populateAudioDevices();
 
-        // 20ms UI Update Timer
         SetTimer(hwnd, 1, 20, NULL);
         break;
     }
 
     case WM_CTLCOLORSTATIC: {
         HDC hdcStatic = (HDC)wParam;
-        SetTextColor(hdcStatic, RGB(248, 248, 242)); // White text
-        SetBkColor(hdcStatic, RGB(30, 30, 46));       // Dark background
+        SetTextColor(hdcStatic, RGB(248, 248, 242)); 
+        SetBkColor(hdcStatic, RGB(30, 30, 46));      
         return (INT_PTR)hBgBrush;
     }
 
@@ -259,16 +242,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hwnd, &ps);
 
-        // Fill Main Window Background
         RECT windowRect;
         GetClientRect(hwnd, &windowRect);
         FillRect(hdc, &windowRect, hBgBrush);
 
-        // Draw Custom VU Meter Bar Container (Bottom)
         RECT vuBgRect = { 20, 325, 330, 345 };
         FillRect(hdc, &vuBgRect, hPanelBrush);
 
-        // Draw Active VU Meter Volume Level Bar
         int barWidth = static_cast<int>((310.0 * audioVolumeLevel) / 100.0);
         RECT vuFillRect = { 20, 325, 20 + barWidth, 345 };
         FillRect(hdc, &vuFillRect, hGreenBrush);
@@ -338,17 +318,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     audioVolumeLevel = 0;
                     SetWindowTextA(hStatusLabel, ("Status: CONNECTED (Room " + std::to_string(g_roomID) + ")").c_str());
                 } else if (audioVolumeLevel > 0) {
-                    // Decay volume level smoothly when receiving/idle
                     audioVolumeLevel = std::max(0, audioVolumeLevel - 5);
                 }
             }
 
-            // Update Statistics Text
             std::string statsStr = "Packets Sent: " + std::to_string(packetsSent) + 
                                    " | Packets Recv: " + std::to_string(packetsRecv);
             SetWindowTextA(hStatsLabel, statsStr.c_str());
 
-            // Redraw VU Meter
             InvalidateRect(hwnd, NULL, FALSE);
         }
         break;
@@ -375,7 +352,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     return 0;
 }
 
-// --- Main Window Launcher ---
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
